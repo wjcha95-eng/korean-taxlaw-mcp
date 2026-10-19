@@ -284,6 +284,22 @@ async def get_document(
         if strip_highlight(r.get("ntstDcmDscmCntn"))
     ]
 
+    # 심급 경과(trilPsagList): 원본 시스템이 같은 사건의 1심·항소심·상고심 문서를 묶어 준다.
+    # 하급심 판결을 인용할 때 상급심 결과(파기·확정)를 놓치지 않도록 그대로 노출한다.
+    # 법원명은 사건번호 문자열("서울고등법원-2023-누-63347")에 이미 들어 있으므로
+    # 의미가 확정되지 않은 내부 코드(ntstDcmIntcClCd)는 해석하지 않고 원값만 싣는다.
+    trial_history = [
+        drop_empty({
+            "documentNumber": strip_highlight(t.get("ntstDcmDscmCntn")),
+            "ntstDcmId": t.get("ntstDcmId"),
+            "registrationDate": format_date(t.get("ntstDcmRgtDt")),
+            "stageCode": t.get("ntstDcmIntcClCd"),
+            "isThisDocument": t.get("ntstDcmId") == doc_id,
+        })
+        for t in ((payload or {}).get("trilPsagList") or [])
+        if strip_highlight(t.get("ntstDcmDscmCntn"))
+    ]
+
     matter = dvo.get("ntstDcmMatrCntn")
     keywords = (
         [w.strip() for w in str(matter).replace(",", ";").split(";") if w.strip()]
@@ -322,6 +338,7 @@ async def get_document(
         "preamble": cut(parsed.preamble) if parsed else None,
         "relatedLaws": related_laws,
         "relatedDocuments": related_documents,
+        "trialHistory": trial_history,
         "authorityLevel": str(level),
         "authorityNote": AUTHORITY_LABEL[level],
         "ntstDcmId": doc_id,
