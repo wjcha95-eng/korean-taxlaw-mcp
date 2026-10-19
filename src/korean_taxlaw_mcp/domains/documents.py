@@ -51,6 +51,10 @@ _ADJUDICATION_SET = _DECISION_SET | {"11", "14"}
 _DETAIL_KIND = {"11": "audit_appeal", "13": "question", "14": "taxpayer_protection"}
 
 
+#: 심급 경과 최대 건수. 실제 심급 묶음은 심판·1심·항소심·상고심·파기환송 정도라 넉넉하다.
+_TRIAL_HISTORY_LIMIT = 10
+
+
 def _to_dcm_cl_cd_ctl(classes: list[str]) -> list[str]:
     """문서구분 → dcmClCdCtl 값. ``002_01`` 은 세법해석정비 계열이다."""
     return ["002_01" if c == "31" else f"001_{c}" for c in classes]
@@ -288,17 +292,24 @@ async def get_document(
     # 하급심 판결을 인용할 때 상급심 결과(파기·확정)를 놓치지 않도록 그대로 노출한다.
     # 법원명은 사건번호 문자열("서울고등법원-2023-누-63347")에 이미 들어 있으므로
     # 의미가 확정되지 않은 내부 코드(ntstDcmIntcClCd)는 해석하지 않고 원값만 싣는다.
+    # 실측 주의: 질의회신(예규) 문서에서는 같은 필드에 관련 해석례 수천 건(코드 "ZZ")이
+    # 실려 와 응답이 수십만 자로 불어난다. 진짜 심급 묶음은 조회 문서 자신을 포함하므로
+    # 자신이 들어 있을 때만 싣고, "ZZ" 는 버리며, 건수 상한을 둔다.
     trial_history = [
         drop_empty({
             "documentNumber": strip_highlight(t.get("ntstDcmDscmCntn")),
             "ntstDcmId": t.get("ntstDcmId"),
             "registrationDate": format_date(t.get("ntstDcmRgtDt")),
             "stageCode": t.get("ntstDcmIntcClCd"),
-            "isThisDocument": t.get("ntstDcmId") == doc_id,
+            "isThisDocument": t.get("ntstDcmId") == doc_id
+            or strip_highlight(t.get("ntstDcmDscmCntn")) == document_number,
         })
         for t in ((payload or {}).get("trilPsagList") or [])
-        if strip_highlight(t.get("ntstDcmDscmCntn"))
+        if strip_highlight(t.get("ntstDcmDscmCntn")) and t.get("ntstDcmIntcClCd") != "ZZ"
     ]
+    if not any(h.get("isThisDocument") for h in trial_history):
+        trial_history = []
+    trial_history = trial_history[:_TRIAL_HISTORY_LIMIT]
 
     matter = dvo.get("ntstDcmMatrCntn")
     keywords = (
