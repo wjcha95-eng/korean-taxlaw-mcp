@@ -554,12 +554,31 @@ async def search_tax_decisions(
         )
 
     classes = list(DECISION_CLASSES) if type == "all" else [_DECISION_TYPE_CODE[type]]
+    # 실측(2026-10-19): 원본이 결정유형 필터(prtsDcsTypeClCtl_2)를 무시해 '국패'를 요청해도
+    # '국승'만 돌아왔다. 원본 필터는 그대로 보내되, 응답을 decisionResult 로 한 번 더 걸러
+    # 요청과 다른 결과가 섞여 나가지 않게 한다. 걸러질 몫을 감안해 원본에서는 넉넉히 받는다.
+    upstream_limit = 100 if result_codes else limit
     found = await search_documents(
         doc_classes=classes, query=merged, match=match, exclude=exclude,
         tax_type_codes=codes, decision_result_codes=result_codes,
         attribution_year=attribution_year, date_from=date_from, date_to=date_to,
-        sort=sort, page=page, limit=limit,
+        sort=sort, page=page, limit=upstream_limit,
     )
+    if result_codes:
+        wanted = {DECISION_RESULT[c] for c in result_codes}
+        kept = [i for i in found["items"] if i.get("decisionResult") in wanted]
+        found = {
+            **found,
+            "items": kept[:limit],
+            "resultFilter": {
+                "applied": "local",
+                "requested": sorted(wanted),
+                "scanned": len(found["items"]),
+                "matched": len(kept),
+                "note": "원본 결정유형 필터가 동작하지 않아 이 페이지(최대 100건) 안에서만 걸렀습니다. "
+                        "'total' 은 필터 전 건수입니다. 더 필요하면 page 를 늘리세요.",
+            },
+        }
     if not found["items"]:
         raise not_found(
             f"판례·결정례 검색 결과가 없습니다 (query={merged!r}).",
