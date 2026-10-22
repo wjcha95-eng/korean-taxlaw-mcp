@@ -136,6 +136,12 @@ def _parse_items(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             entry["itemId"] = str(r["ntstExrBaseSn"])
         if text:
             entry["text"] = truncate(text).text
+            # 삭제된 조항은 본문 자리에 '<삭제 날짜>' 또는 '<조문번호이동으로 삭제 날짜>'만 있다
+            if re.fullmatch(r"\s*<\s*(?:조문번호이동으로\s*)?삭제[^<>]*>\s*", text):
+                entry["deleted"] = True
+        elif str(r.get("lawClCd") or "") in ("1", "2", "3", "4"):
+            # 편·장·절·관 제목 행은 원래 본문이 없다 (lawClCd 2=장, 3=절 실측)
+            entry["note"] = "편·장·절 제목 행 (조항이 아니므로 본문 없음)"
         items.append(entry)
     return items
 
